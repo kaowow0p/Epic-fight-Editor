@@ -8,13 +8,13 @@ public static class ValidationHelper
     {
         if (string.IsNullOrWhiteSpace(projectPath))
         {
-            errorMessage = "Project folder or JAR file is not selected.";
+            errorMessage = "JAR file is not selected.";
             return false;
         }
 
-        if (!Directory.Exists(projectPath) && !IsJarFile(projectPath))
+        if (!IsJarFile(projectPath))
         {
-            errorMessage = "Selected project folder or JAR file does not exist.";
+            errorMessage = "Selected JAR file does not exist.";
             return false;
         }
 

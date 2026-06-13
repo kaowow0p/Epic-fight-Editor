@@ -1,5 +1,6 @@
 using EpicFightJsonGeneratorApp.Models;
 using EpicFightJsonGeneratorApp.Services;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace EpicFightJsonGeneratorApp.Forms;
@@ -77,15 +78,14 @@ public sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        Button browseButton = new() { Text = "Browse", AutoSize = true };
-        ContextMenuStrip browseMenu = CreateBrowseMenu();
-        browseButton.Click += (_, _) => browseMenu.Show(browseButton, new Point(0, browseButton.Height));
+        Button browseButton = new() { Text = "Browse JAR...", AutoSize = true };
+        browseButton.Click += BrowseJarButton_Click;
 
         _scanButton.Text = "Scan";
         _scanButton.AutoSize = true;
         _scanButton.Click += ScanButton_Click;
 
-        panel.Controls.Add(new Label { Text = "Project / JAR", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+        panel.Controls.Add(new Label { Text = "JAR File", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         panel.Controls.Add(_projectFolderTextBox, 1, 0);
         panel.Controls.Add(CreateButtonPanel(browseButton, _scanButton), 2, 0);
 
@@ -100,22 +100,6 @@ public sealed class MainForm : Form
         _outputFolderTextBox.Dock = DockStyle.Fill;
 
         return panel;
-    }
-
-    private ContextMenuStrip CreateBrowseMenu()
-    {
-        ContextMenuStrip menu = new();
-
-        ToolStripMenuItem folderItem = new("Folder...");
-        folderItem.Click += BrowseProjectButton_Click;
-
-        ToolStripMenuItem jarItem = new("JAR...");
-        jarItem.Click += BrowseJarButton_Click;
-
-        menu.Items.Add(folderItem);
-        menu.Items.Add(jarItem);
-
-        return menu;
     }
 
     private Control CreateMainContentPanel()
@@ -351,55 +335,52 @@ public sealed class MainForm : Form
         _typeComboBox.Text = "epicfight:axe";
     }
 
-    private void BrowseProjectButton_Click(object? sender, EventArgs e)
-    {
-        using FolderBrowserDialog dialog = new()
-        {
-            Description = "Select Minecraft mod root folder or src/main/resources folder",
-            UseDescriptionForTitle = true
-        };
-
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
-        }
-
-        _projectFolderTextBox.Text = dialog.SelectedPath;
-        _isOutputFolderManuallySelected = false;
-        _outputFolderTextBox.Clear();
-    }
-
     private void BrowseJarButton_Click(object? sender, EventArgs e)
     {
-        using OpenFileDialog dialog = new()
+        try
         {
-            Title = "Select Minecraft mod JAR file",
-            Filter = "Minecraft mod JAR (*.jar)|*.jar|All files (*.*)|*.*",
-            CheckFileExists = true
-        };
+            using OpenFileDialog dialog = new()
+            {
+                Title = "Select Minecraft mod JAR file",
+                Filter = "Minecraft mod JAR (*.jar)|*.jar|All files (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            };
 
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            _projectFolderTextBox.Text = dialog.FileName;
+            _isOutputFolderManuallySelected = false;
+            _outputFolderTextBox.Clear();
         }
-
-        _projectFolderTextBox.Text = dialog.FileName;
-        _isOutputFolderManuallySelected = false;
-        _outputFolderTextBox.Clear();
+        catch (Exception ex) when (ex is InvalidOperationException or ExternalException or ArgumentException)
+        {
+            ShowError($"JAR dialog failed: {ex.Message}");
+        }
     }
 
     private void BrowseOutputButton_Click(object? sender, EventArgs e)
     {
-        using FolderBrowserDialog dialog = new()
+        try
         {
-            Description = "Select output folder for Epic Fight JSON files",
-            UseDescriptionForTitle = true
-        };
+            using FolderBrowserDialog dialog = new()
+            {
+                Description = "Select output folder for generated JSON files",
+                UseDescriptionForTitle = true
+            };
 
-        if (dialog.ShowDialog(this) == DialogResult.OK)
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                _isOutputFolderManuallySelected = true;
+                _outputFolderTextBox.Text = dialog.SelectedPath;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ExternalException or ArgumentException)
         {
-            _isOutputFolderManuallySelected = true;
-            _outputFolderTextBox.Text = dialog.SelectedPath;
+            ShowError($"Output folder dialog failed: {ex.Message}");
         }
     }
 
@@ -476,32 +457,46 @@ public sealed class MainForm : Form
 
     private async Task CreateJsonFileAsync()
     {
-        ItemModelInfo? selectedItem = _itemsListBox.SelectedItem as ItemModelInfo;
-        if (!ValidationHelper.TryValidateGenerationInput(
-                _projectFolderTextBox.Text,
-                _outputFolderTextBox.Text,
-                selectedItem,
-                _impactTextBox.Text,
-                _maxStrikesTextBox.Text,
-                _typeComboBox.Text,
-                out GenerationInput input,
-                out string errorMessage))
-        {
-            ShowError(errorMessage);
-            return;
-        }
-
-        string outputPath = Path.Combine(input.OutputFolder, $"{input.ItemName}.json");
-        bool overwrite = ConfirmOverwriteIfNeeded(outputPath);
-        if (File.Exists(outputPath) && !overwrite)
-        {
-            return;
-        }
-
-        SetBusyState(true);
+        bool isBusy = false;
 
         try
         {
+            ItemModelInfo? selectedItem = _itemsListBox.SelectedItem as ItemModelInfo;
+            EnsureDefaultOutputFolder(selectedItem);
+
+            if (!ValidationHelper.TryValidateGenerationInput(
+                    _projectFolderTextBox.Text,
+                    _outputFolderTextBox.Text,
+                    selectedItem,
+                    _impactTextBox.Text,
+                    _maxStrikesTextBox.Text,
+                    _typeComboBox.Text,
+                    out GenerationInput input,
+                    out string errorMessage))
+            {
+                ShowError(errorMessage);
+                return;
+            }
+
+            string? outputFolder = ChooseOutputFolderBeforeCreate(input.OutputFolder);
+            if (string.IsNullOrWhiteSpace(outputFolder))
+            {
+                _statusLabel.Text = "JSON creation canceled.";
+                return;
+            }
+
+            input = input with { OutputFolder = outputFolder };
+
+            string outputPath = Path.Combine(input.OutputFolder, $"{input.ItemName}.json");
+            bool overwrite = ConfirmOverwriteIfNeeded(outputPath);
+            if (File.Exists(outputPath) && !overwrite)
+            {
+                return;
+            }
+
+            SetBusyState(true);
+            isBusy = true;
+
             string createdPath = await _generator.SaveWeaponCapabilityAsync(
                 input.OutputFolder,
                 input.ItemName,
@@ -514,14 +509,79 @@ public sealed class MainForm : Form
 
             _statusLabel.Text = $"Created: {createdPath}";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception ex)
         {
-            ShowError(ex.Message);
+            ShowError($"Failed to create JSON file: {ex.Message}");
         }
         finally
         {
-            SetBusyState(false);
+            if (isBusy)
+            {
+                SetBusyState(false);
+            }
         }
+    }
+
+    private void EnsureDefaultOutputFolder(ItemModelInfo? selectedItem)
+    {
+        if (selectedItem is null || _isOutputFolderManuallySelected || !string.IsNullOrWhiteSpace(_outputFolderTextBox.Text))
+        {
+            return;
+        }
+
+        SuggestOutputFolder(selectedItem);
+    }
+
+    private string? ChooseOutputFolderBeforeCreate(string currentOutputFolder)
+    {
+        try
+        {
+            using FolderBrowserDialog dialog = new()
+            {
+                Description = "Choose where to save the generated JSON file",
+                UseDescriptionForTitle = true,
+                SelectedPath = GetExistingFolderForDialog(currentOutputFolder)
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
+            {
+                _isOutputFolderManuallySelected = true;
+                _outputFolderTextBox.Text = dialog.SelectedPath;
+                return dialog.SelectedPath;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ExternalException or ArgumentException)
+        {
+            ShowError($"Output folder dialog failed: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private static string GetExistingFolderForDialog(string outputFolder)
+    {
+        try
+        {
+            if (Directory.Exists(outputFolder))
+            {
+                return outputFolder;
+            }
+
+            string? currentFolder = outputFolder;
+            while (!string.IsNullOrWhiteSpace(currentFolder))
+            {
+                currentFolder = Path.GetDirectoryName(currentFolder);
+                if (!string.IsNullOrWhiteSpace(currentFolder) && Directory.Exists(currentFolder))
+                {
+                    return currentFolder;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
     }
 
     private bool ConfirmOverwriteIfNeeded(string outputPath)
