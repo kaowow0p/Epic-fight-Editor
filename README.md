@@ -18,8 +18,7 @@ The app can scan either:
 
 Use:
 
-- `Browse Folder...` for a project/resources folder
-- `Browse JAR...` for a mod jar
+- `Browse` to choose either a folder or a JAR file
 - `Scan` to load items
 
 ## Output folder
@@ -83,4 +82,3 @@ GUI and 3D variants are not shown as main items.
 ```powershell
 dotnet run
 ```
-

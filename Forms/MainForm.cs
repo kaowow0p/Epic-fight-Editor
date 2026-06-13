@@ -77,11 +77,9 @@ public sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        Button browseProjectButton = new() { Text = "Browse", AutoSize = true };
-        browseProjectButton.Click += BrowseProjectButton_Click;
-
-        Button browseJarButton = new() { Text = "Browse JAR...", AutoSize = true };
-        browseJarButton.Click += BrowseJarButton_Click;
+        Button browseButton = new() { Text = "Browse", AutoSize = true };
+        ContextMenuStrip browseMenu = CreateBrowseMenu();
+        browseButton.Click += (_, _) => browseMenu.Show(browseButton, new Point(0, browseButton.Height));
 
         _scanButton.Text = "Scan";
         _scanButton.AutoSize = true;
@@ -89,7 +87,7 @@ public sealed class MainForm : Form
 
         panel.Controls.Add(new Label { Text = "Project / JAR", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         panel.Controls.Add(_projectFolderTextBox, 1, 0);
-        panel.Controls.Add(CreateButtonPanel(browseProjectButton, browseJarButton, _scanButton), 2, 0);
+        panel.Controls.Add(CreateButtonPanel(browseButton, _scanButton), 2, 0);
 
         Button browseOutputButton = new() { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += BrowseOutputButton_Click;
@@ -102,6 +100,22 @@ public sealed class MainForm : Form
         _outputFolderTextBox.Dock = DockStyle.Fill;
 
         return panel;
+    }
+
+    private ContextMenuStrip CreateBrowseMenu()
+    {
+        ContextMenuStrip menu = new();
+
+        ToolStripMenuItem folderItem = new("Folder...");
+        folderItem.Click += BrowseProjectButton_Click;
+
+        ToolStripMenuItem jarItem = new("JAR...");
+        jarItem.Click += BrowseJarButton_Click;
+
+        menu.Items.Add(folderItem);
+        menu.Items.Add(jarItem);
+
+        return menu;
     }
 
     private Control CreateMainContentPanel()
